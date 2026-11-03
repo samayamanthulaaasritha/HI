@@ -1,0 +1,67 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        getUserData().role == 'admin' || 
+        request.auth.token.email == 'admin@hotelinfo.com'
+      );
+    }
+
+    function isBusinessAdmin(businessId) {
+      return isAuthenticated() && (
+        getUserData().role == 'business_admin' && 
+        getUserData().businessId == businessId
+      );
+    }
+
+    // 1. Users collection
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow write: if isAdmin() || (isAuthenticated() && request.auth.uid == userId);
+    }
+
+    // 2. Businesses collection
+    match /businesses/{businessId} {
+      // Anyone can read active businesses for discovery
+      allow read: if resource.data.isActive == true || isAdmin() || isBusinessAdmin(businessId);
+      // Only platform admin can create or delete businesses; business admin can update their own
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || isBusinessAdmin(businessId);
+    }
+
+    // 3. Rooms collection
+    match /rooms/{roomId} {
+      allow read: if true; // Public discovery for travelers
+      allow create, update, delete: if isAdmin() || isBusinessAdmin(request.resource.data.businessId || resource.data.businessId);
+    }
+
+    // 4. Food Items collection
+    match /foodItems/{foodId} {
+      allow read: if true; // Public menu discovery for travelers
+      allow create, update, delete: if isAdmin() || isBusinessAdmin(request.resource.data.businessId || resource.data.businessId);
+    }
+
+    // 5. Business Collaboration Inquiries
+    match /collabInquiries/{inquiryId} {
+      allow create: if true; // Anyone can submit partnership inquiry to admin
+      allow read, update, delete: if isAdmin();
+    }
+
+    // 6. Search Analytics & Recent Searches
+    match /searchAnalytics/{docId} {
+      allow create: if true;
+      allow read: if isAdmin();
+    }
+  }
+}
